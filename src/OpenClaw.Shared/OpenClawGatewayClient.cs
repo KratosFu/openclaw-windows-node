@@ -16,6 +16,26 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
 {
     private const string OperatorClientId = "cli";
     private const string OperatorClientMode = "cli";
+
+    /// <summary>
+    /// What this client tells the gateway it can do, sent as
+    /// <c>connect.params.caps</c>. Null means the previous behaviour: an
+    /// empty array.
+    ///
+    /// The node profile has carried capabilities since it existed; the
+    /// operator profile hard-coded an empty list, which left an operator
+    /// client unable to declare itself an approval surface. The gateway only
+    /// broadcasts <c>exec.approval.requested</c> to a client whose id is one
+    /// of its four known approval apps or whose caps contain "approvals", so
+    /// without this an operator connection is never asked, and an exec that
+    /// needs approval is denied with no prompt shown anywhere.
+    ///
+    /// Left to the caller rather than set here, because advertising it is a
+    /// promise: it tells the gateway a human can be asked. A client that
+    /// advertises it and cannot resolve turns a fast denial into a run that
+    /// waits.
+    /// </summary>
+    private readonly IReadOnlyList<string>? _clientCapabilities;
     private const string OperatorRole = "operator";
     private static readonly Regex s_pairingRequestIdRegex = new("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", RegexOptions.Compiled);
     private static readonly string[] s_operatorScopes =
@@ -303,9 +323,11 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
         bool ignoreStoredDeviceToken = false,
         bool persistHandshakeDeviceTokens = true,
         string? assistantMediaAuthToken = null,
-        HttpMessageHandler? assistantMediaHandler = null)
+        HttpMessageHandler? assistantMediaHandler = null,
+        IReadOnlyList<string>? clientCapabilities = null)
         : base(gatewayUrl, token, logger)
     {
+        _clientCapabilities = clientCapabilities;
         _tokenIsBootstrapToken = tokenIsBootstrapToken;
         _bootstrapPairAsNode = bootstrapPairAsNode;
         _ignoreStoredDeviceToken = ignoreStoredDeviceToken;
@@ -1977,7 +1999,8 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
                 credential,
                 nonce,
                 _challengeTimestampMs,
-                _useV2Signature),
+                _useV2Signature,
+                _clientCapabilities),
             _connectEnvelopeSigner);
         var signedAt = envelope.SignedAt;
         var connectNonce = envelope.Nonce!;

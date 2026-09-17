@@ -65,6 +65,61 @@ public sealed class ConnectEnvelopeBuilderTests
     }
 
     [Fact]
+    public void OperatorEnvelope_CarriesDeclaredCapabilities_WithoutChangingWhatIsSigned()
+    {
+        // An operator client that declares nothing is not an approval
+        // surface: the gateway broadcasts exec.approval.requested only to a
+        // client whose id is one of its known approval apps or whose caps
+        // contain "approvals". Before this, the operator profile always sent
+        // an empty array, so an exec needing approval was denied with no
+        // prompt raised anywhere and nothing in the logs naming the reason.
+        var withoutCaps = Serialize(capabilities: null, out var signerWithout);
+        var withCaps = Serialize(capabilities: ["approvals"], out var signerWith);
+
+        Assert.Equal([], StringValues(Params(withoutCaps).GetProperty("caps")));
+        Assert.Equal(["approvals"], StringValues(Params(withCaps).GetProperty("caps")));
+
+        // caps sit outside the signed payload -- v3 covers nonce, signedAt,
+        // client id and mode, role, scopes, token, platform and device
+        // family, and nothing else. Worth asserting rather than assuming:
+        // if a later protocol revision folds caps into the signature,
+        // declaring one would start failing the handshake instead, and the
+        // failure would look like a credential problem.
+        var before = Assert.Single(signerWithout.Calls);
+        var after = Assert.Single(signerWith.Calls);
+        Assert.Equal(before.Nonce, after.Nonce);
+        Assert.Equal(before.SignedAtMs, after.SignedAtMs);
+        Assert.Equal(before.ClientId, after.ClientId);
+        Assert.Equal(before.ClientMode, after.ClientMode);
+        Assert.Equal(before.Role, after.Role);
+        Assert.Equal(before.Scopes, after.Scopes);
+        Assert.Equal(before.AuthToken, after.AuthToken);
+        Assert.Equal(before.Platform, after.Platform);
+        Assert.Equal(before.DeviceFamily, after.DeviceFamily);
+
+        static JsonElement Params(string json) =>
+            JsonDocument.Parse(json).RootElement.GetProperty("params").Clone();
+    }
+
+    private static string Serialize(IReadOnlyList<string>? capabilities, out CaptureSigner signer)
+    {
+        signer = new CaptureSigner();
+        var envelope = ConnectEnvelopeBuilder.PrepareOperator(
+            new OperatorConnectEnvelopeOptions(
+                RequestId,
+                "9.8.7",
+                "operator",
+                ["operator.approvals"],
+                new DeviceTokenConnectCredential("paired-device"),
+                Nonce,
+                ChallengeTimestamp,
+                UseV2Signature: false,
+                Capabilities: capabilities),
+            signer);
+        return envelope.Serialize(envelope.Sign());
+    }
+
+    [Fact]
     public void CredentialFormatting_IdentifiesKindWithoutTokenValue()
     {
         var cases = new (ConnectCredential Credential, string Kind, string SensitiveValue)[]

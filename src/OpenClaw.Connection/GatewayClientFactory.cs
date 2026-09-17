@@ -12,7 +12,28 @@ public sealed class GatewayClientFactory : IGatewayClientFactory
         string gatewayUrl,
         GatewayCredential credential,
         string identityPath,
-        IOpenClawLogger logger)
+        IOpenClawLogger logger) =>
+        Create(gatewayUrl, credential, identityPath, logger, clientCapabilities: null);
+
+    /// <summary>
+    /// As above, declaring what this client can do in the connect handshake.
+    ///
+    /// Separate from the interface method on purpose: <see cref="IGatewayClientFactory"/>
+    /// has mock implementations, and widening it would break every one of
+    /// them for a capability most callers do not want. A caller that needs
+    /// caps holds the concrete factory.
+    ///
+    /// "approvals" is the one that matters today — the gateway broadcasts
+    /// exec approval requests only to clients that declare it (or that carry
+    /// one of four known approval client ids). Declare it only when there is
+    /// a surface that can actually answer.
+    /// </summary>
+    public IGatewayClientLifecycle Create(
+        string gatewayUrl,
+        GatewayCredential credential,
+        string identityPath,
+        IOpenClawLogger logger,
+        IReadOnlyList<string>? clientCapabilities)
     {
         var client = new OpenClawGatewayClient(
             gatewayUrl,
@@ -22,7 +43,8 @@ public sealed class GatewayClientFactory : IGatewayClientFactory
             bootstrapPairAsNode: false,
             identityPath: identityPath,
             ignoreStoredDeviceToken: credential.IsBootstrapToken,
-            assistantMediaAuthToken: credential.InteractiveHttpToken);
+            assistantMediaAuthToken: credential.InteractiveHttpToken,
+            clientCapabilities: clientCapabilities);
 
         return new GatewayClientLifecycleAdapter(client);
     }

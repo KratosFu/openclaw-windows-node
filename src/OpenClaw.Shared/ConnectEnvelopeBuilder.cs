@@ -123,7 +123,8 @@ internal sealed record OperatorConnectEnvelopeOptions(
     ConnectCredential Credential,
     string? Nonce,
     long? ChallengeTimestampMs,
-    bool UseV2Signature);
+    bool UseV2Signature,
+    IReadOnlyList<string>? Capabilities = null);
 
 internal sealed record NodeConnectEnvelopeOptions(
     string RequestId,
@@ -374,7 +375,7 @@ internal static class ConnectEnvelopeBuilder
             WindowsClientMetadata.Platform,
             WindowsClientMetadata.DeviceFamily,
             OperatorDisplayName,
-            [],
+            options.Capabilities?.ToArray() ?? [],
             [],
             new Dictionary<string, bool>(),
             options.Credential,
