@@ -124,7 +124,8 @@ internal sealed record OperatorConnectEnvelopeOptions(
     string? Nonce,
     long? ChallengeTimestampMs,
     bool UseV2Signature,
-    IReadOnlyList<string>? Capabilities = null);
+    IReadOnlyList<string>? Capabilities = null,
+    string? DisplayName = null);
 
 internal sealed record NodeConnectEnvelopeOptions(
     string RequestId,
@@ -340,6 +341,19 @@ internal static class ConnectEnvelopeBuilder
 {
     private const string OperatorClientId = "cli";
     private const string OperatorClientMode = "cli";
+    /// <summary>
+    /// What an operator connection is called when the caller does not say.
+    ///
+    /// The node profile has taken a DisplayName since it existed; the
+    /// operator profile hard-coded this one. It is not a cosmetic label: the
+    /// gateway writes it into <c>operator_approvals.resolver_id</c>, so every
+    /// approval a different app resolves is recorded against this name. An
+    /// app that ships its own approval UI has to be able to say who it is,
+    /// or its audit trail credits someone else.
+    ///
+    /// Not part of the signing arguments, so overriding it does not change
+    /// the handshake signature.
+    /// </summary>
     private const string OperatorDisplayName = "OpenClaw Windows Tray";
     private const string NodeClientId = "node-host";
     private const string NodeClientMode = "node";
@@ -374,7 +388,9 @@ internal static class ConnectEnvelopeBuilder
             options.Version,
             WindowsClientMetadata.Platform,
             WindowsClientMetadata.DeviceFamily,
-            OperatorDisplayName,
+            string.IsNullOrWhiteSpace(options.DisplayName)
+                ? OperatorDisplayName
+                : options.DisplayName,
             options.Capabilities?.ToArray() ?? [],
             [],
             new Dictionary<string, bool>(),

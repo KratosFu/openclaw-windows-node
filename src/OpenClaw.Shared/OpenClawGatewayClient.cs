@@ -36,6 +36,17 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
     /// waits.
     /// </summary>
     private readonly IReadOnlyList<string>? _clientCapabilities;
+
+    /// <summary>
+    /// What this client calls itself in the connect handshake. Null keeps the
+    /// previous behaviour, the library's own operator name.
+    ///
+    /// The gateway records it as <c>operator_approvals.resolver_id</c>, so it
+    /// is the name an audit ledger credits when a human answers an approval
+    /// here. An app with its own approval UI that leaves this unset has its
+    /// operator's decisions attributed to a different product.
+    /// </summary>
+    private readonly string? _clientDisplayName;
     private const string OperatorRole = "operator";
     private static readonly Regex s_pairingRequestIdRegex = new("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", RegexOptions.Compiled);
     private static readonly string[] s_operatorScopes =
@@ -324,10 +335,12 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
         bool persistHandshakeDeviceTokens = true,
         string? assistantMediaAuthToken = null,
         HttpMessageHandler? assistantMediaHandler = null,
-        IReadOnlyList<string>? clientCapabilities = null)
+        IReadOnlyList<string>? clientCapabilities = null,
+        string? clientDisplayName = null)
         : base(gatewayUrl, token, logger)
     {
         _clientCapabilities = clientCapabilities;
+        _clientDisplayName = clientDisplayName;
         _tokenIsBootstrapToken = tokenIsBootstrapToken;
         _bootstrapPairAsNode = bootstrapPairAsNode;
         _ignoreStoredDeviceToken = ignoreStoredDeviceToken;
@@ -2014,7 +2027,8 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
                 nonce,
                 _challengeTimestampMs,
                 _useV2Signature,
-                _clientCapabilities),
+                _clientCapabilities,
+                _clientDisplayName),
             _connectEnvelopeSigner);
         var signedAt = envelope.SignedAt;
         var connectNonce = envelope.Nonce!;

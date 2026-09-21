@@ -101,7 +101,13 @@ public sealed class ConnectEnvelopeBuilderTests
             JsonDocument.Parse(json).RootElement.GetProperty("params").Clone();
     }
 
-    private static string Serialize(IReadOnlyList<string>? capabilities, out CaptureSigner signer)
+    private static string Serialize(IReadOnlyList<string>? capabilities, out CaptureSigner signer) =>
+        Serialize(capabilities, displayName: null, out signer);
+
+    private static string Serialize(
+        IReadOnlyList<string>? capabilities,
+        string? displayName,
+        out CaptureSigner signer)
     {
         signer = new CaptureSigner();
         var envelope = ConnectEnvelopeBuilder.PrepareOperator(
@@ -114,9 +120,43 @@ public sealed class ConnectEnvelopeBuilderTests
                 Nonce,
                 ChallengeTimestamp,
                 UseV2Signature: false,
-                Capabilities: capabilities),
+                Capabilities: capabilities,
+                DisplayName: displayName),
             signer);
         return envelope.Serialize(envelope.Sign());
+    }
+
+    [Fact]
+    public void OperatorEnvelope_NamesItselfWhenTheCallerSaysSo()
+    {
+        // Not cosmetic. The gateway stores this name as the resolver of any
+        // approval answered on this connection
+        // (operator_approvals.resolver_id), so an app shipping its own
+        // approval UI that cannot set it has a human's decision about its own
+        // hardware credited to a different product.
+        var defaulted = Serialize(capabilities: null, displayName: null, out var signerDefault);
+        var named = Serialize(capabilities: null, displayName: "MSI AI Companion", out var signerNamed);
+
+        Assert.Equal("OpenClaw Windows Tray", Params(defaulted).GetProperty("client").GetProperty("displayName").GetString());
+        Assert.Equal("MSI AI Companion", Params(named).GetProperty("client").GetProperty("displayName").GetString());
+
+        // Blank is not a name. Whitespace would otherwise reach the gateway
+        // as the identity of whoever approved something.
+        var blank = Serialize(capabilities: null, displayName: "   ", out _);
+        Assert.Equal("OpenClaw Windows Tray", Params(blank).GetProperty("client").GetProperty("displayName").GetString());
+
+        // displayName sits outside the signed payload, same as caps. If a
+        // later revision folds it in, setting one would fail the handshake
+        // and look like a credential fault instead.
+        var before = Assert.Single(signerDefault.Calls);
+        var after = Assert.Single(signerNamed.Calls);
+        Assert.Equal(before.Nonce, after.Nonce);
+        Assert.Equal(before.ClientId, after.ClientId);
+        Assert.Equal(before.Role, after.Role);
+        Assert.Equal(before.Scopes, after.Scopes);
+
+        static JsonElement Params(string json) =>
+            JsonDocument.Parse(json).RootElement.GetProperty("params").Clone();
     }
 
     [Fact]

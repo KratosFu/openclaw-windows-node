@@ -33,7 +33,23 @@ public sealed class GatewayClientFactory : IGatewayClientFactory
         GatewayCredential credential,
         string identityPath,
         IOpenClawLogger logger,
-        IReadOnlyList<string>? clientCapabilities)
+        IReadOnlyList<string>? clientCapabilities) =>
+        Create(gatewayUrl, credential, identityPath, logger, clientCapabilities, clientDisplayName: null);
+
+    /// <summary>
+    /// As above, also naming this client in the handshake.
+    ///
+    /// The gateway records that name as the resolver of any approval answered
+    /// here, so an app with its own approval UI passes its own name or the
+    /// audit ledger credits the library's default instead.
+    /// </summary>
+    public IGatewayClientLifecycle Create(
+        string gatewayUrl,
+        GatewayCredential credential,
+        string identityPath,
+        IOpenClawLogger logger,
+        IReadOnlyList<string>? clientCapabilities,
+        string? clientDisplayName)
     {
         var client = new OpenClawGatewayClient(
             gatewayUrl,
@@ -44,7 +60,8 @@ public sealed class GatewayClientFactory : IGatewayClientFactory
             identityPath: identityPath,
             ignoreStoredDeviceToken: credential.IsBootstrapToken,
             assistantMediaAuthToken: credential.InteractiveHttpToken,
-            clientCapabilities: clientCapabilities);
+            clientCapabilities: clientCapabilities,
+            clientDisplayName: clientDisplayName);
 
         return new GatewayClientLifecycleAdapter(client);
     }
