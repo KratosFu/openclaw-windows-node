@@ -72,6 +72,93 @@ public class OpenClawGatewayClientApprovalTranslationTests
     }
 
     [Fact]
+    public void PluginApprovalRequested_TopLevelEvent_CarriesItsOwnPromptText()
+    {
+        var client = NewClient();
+        AgentEventInfo? observed = null;
+        client.AgentEventReceived += (_, evt) => observed = evt;
+
+        // Shape taken from the gateway's own approval ledger
+        // (operator_approvals.presentation_json plus the source columns it
+        // splits off the record). A plugin approval has no ``command``: the
+        // text a human reads is the title and description its hook wrote,
+        // and dropping them would leave an Allow/Deny card asking nothing.
+        const string json = """
+            {
+              "type": "event",
+              "event": "plugin.approval.requested",
+              "payload": {
+                "approvalKind": "plugin",
+                "id": "plugin:fbd23ff1-7b3f-456f-899f-2daac4333e63",
+                "request": {
+                  "kind": "plugin",
+                  "title": "MSI skill: msi__system_health_check",
+                  "description": "luckyclaw-main-agent wants to run msi__system_health_check on this machine. Arguments: {}",
+                  "severity": "warning",
+                  "pluginId": "msi-approvals",
+                  "toolName": "msi__system_health_check",
+                  "agentId": "luckyclaw-main-agent",
+                  "sessionKey": "agent:luckyclaw-main-agent:main",
+                  "allowedDecisions": ["allow-once", "deny"]
+                },
+                "createdAtMs": 1789958378531,
+                "expiresAtMs": 1789958678531
+              }
+            }
+            """;
+
+        InvokeHandleEvent(client, json);
+
+        Assert.NotNull(observed);
+        Assert.Equal("approval", observed!.Stream);
+        Assert.Equal("agent:luckyclaw-main-agent:main", observed.SessionKey);
+        Assert.Equal("requested", observed.Data.GetProperty("phase").GetString());
+        Assert.Equal(
+            "plugin:fbd23ff1-7b3f-456f-899f-2daac4333e63",
+            observed.Data.GetProperty("approvalId").GetString());
+        Assert.Equal("plugin", observed.Data.GetProperty("kind").GetString());
+        Assert.Equal(
+            "MSI skill: msi__system_health_check",
+            observed.Data.GetProperty("title").GetString());
+        Assert.Contains("msi__system_health_check", observed.Data.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public void ExecApprovalRequested_StillCarriesNoPluginOnlyFields()
+    {
+        // The two families share one projection now. An exec approval must
+        // come out of it exactly as before, or this change would have moved
+        // a working path to make a new one work.
+        var client = NewClient();
+        AgentEventInfo? observed = null;
+        client.AgentEventReceived += (_, evt) => observed = evt;
+
+        const string json = """
+            {
+              "type": "event",
+              "event": "exec.approval.requested",
+              "payload": {
+                "id": "4d6a4c38-5226-4ffe-a0e1-fb4acff1181d",
+                "request": {
+                  "command": "openclaw nodes invoke --command system.run",
+                  "host": "gateway",
+                  "sessionKey": "agent:main:main",
+                  "agentId": "main"
+                }
+              }
+            }
+            """;
+
+        InvokeHandleEvent(client, json);
+
+        Assert.NotNull(observed);
+        Assert.False(observed!.Data.TryGetProperty("title", out _));
+        Assert.False(observed.Data.TryGetProperty("message", out _));
+        Assert.False(observed.Data.TryGetProperty("kind", out _));
+        Assert.Equal("requested", observed.Data.GetProperty("phase").GetString());
+    }
+
+    [Fact]
     public void ExecApprovalResolved_DenyDecision_MapsToDeniedPhase()
     {
         var client = NewClient();

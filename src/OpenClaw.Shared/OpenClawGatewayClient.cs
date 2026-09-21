@@ -525,7 +525,21 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
     /// <exception cref="InvalidOperationException">Thrown when the gateway is not connected at call time, or returns an <c>ok:false</c> response. The caller (e.g. the chat approval banner) relies on this to keep the Allow/Deny UI on screen for retry instead of silently dismissing it when the resolve was actually rejected.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the gateway connection is lost while the resolve is in flight. Same banner-preserve contract.</exception>
     /// <exception cref="TimeoutException">Thrown when no response arrives within the resolve timeout window. Preserves the banner for retry.</exception>
-    public async Task ResolveExecApprovalAsync(string approvalId, string decision)
+    public Task ResolveExecApprovalAsync(string approvalId, string decision) =>
+        ResolveApprovalAsync("exec.approval.resolve", approvalId, decision);
+
+    /// <summary>
+    /// Resolves a pending plugin approval (<c>plugin.approval.resolve</c>),
+    /// the gate a plugin's <c>before_tool_call</c> hook opens with
+    /// <c>requireApproval</c>. Same required scope and same contract as the
+    /// exec sibling above, including the rule against answering by chat
+    /// command: the agent is blocked on this approval, so a queued message
+    /// cannot reach it.
+    /// </summary>
+    public Task ResolvePluginApprovalAsync(string approvalId, string decision) =>
+        ResolveApprovalAsync("plugin.approval.resolve", approvalId, decision);
+
+    private async Task ResolveApprovalAsync(string method, string approvalId, string decision)
     {
         if (string.IsNullOrWhiteSpace(approvalId))
             throw new ArgumentException("approvalId is required", nameof(approvalId));
@@ -538,19 +552,19 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
         // can never complete. The post-await re-check below handles the
         // race window where the socket drops mid-send.
         if (!IsConnected)
-            throw new InvalidOperationException("Cannot resolve exec approval: gateway is not connected.");
+            throw new InvalidOperationException($"Cannot resolve approval: gateway is not connected ({method}).");
 
         var requestId = Guid.NewGuid().ToString();
         var pending = _pendingRequests.RegisterApproval(
             requestId,
-            "exec.approval.resolve");
+            method);
 
         // A lifecycle drain faults this task with OperationCanceledException.
         // Banner callers must keep catching System.Exception so disconnects
         // preserve the approval UI and surface a retryable error.
         try
         {
-            await SendRawAsync(SerializeRequest(requestId, "exec.approval.resolve", new { id = approvalId, decision }));
+            await SendRawAsync(SerializeRequest(requestId, method, new { id = approvalId, decision }));
         }
         catch
         {
@@ -571,7 +585,7 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
         // it set is observed by the caller.
         if (!IsConnected && _pendingRequests.TryRemove(pending.Handle))
         {
-            throw new InvalidOperationException("Gateway disconnected before exec.approval.resolve was sent.");
+            throw new InvalidOperationException($"Gateway disconnected before {method} was sent.");
         }
 
         // Bounded wait. Approval-resolve is interactive and the response may
@@ -584,7 +598,7 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
                 pending.Task,
                 TimeSpan.FromSeconds(15),
                 CancellationToken,
-                "Timed out waiting for exec.approval.resolve response from gateway");
+                $"Timed out waiting for {method} response from gateway");
         }
         finally
         {
@@ -3336,6 +3350,15 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
                 break;
             case "exec.approval.requested":
             case "exec.approval.resolved":
+            // Plugin approvals travel the same way and were dropped here.
+            // A plugin's before_tool_call hook can return requireApproval,
+            // which is the only per-call gate a tool borrowed over MCP has;
+            // the gateway broadcasts it to this client (measured: the
+            // approval ledger recorded this device as a reviewer) and
+            // nothing downstream ever saw it, because only the exec names
+            // were translated. Same envelope, same consumers.
+            case "plugin.approval.requested":
+            case "plugin.approval.resolved":
                 // Gateway broadcasts approval lifecycle as TOP-LEVEL events,
                 // but the chat data provider's approval rendering subscribes
                 // to AgentEventReceived with Stream=="approval" (the only
@@ -3392,12 +3415,22 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
         string host = "";
         string sessionKey = "";
         string agentId = "";
+        string title = "";
+        string description = "";
+        string kind = "";
         if (payload.TryGetProperty("request", out var req) && req.ValueKind == JsonValueKind.Object)
         {
             command = SafeStr(req, "command");
             host = SafeStr(req, "host");
             sessionKey = SafeStr(req, "sessionKey");
             agentId = SafeStr(req, "agentId");
+            // An exec approval describes itself with ``command``; a plugin
+            // approval carries the text its hook wrote, as ``title`` and
+            // ``description``. Both are read here and the empty ones are
+            // dropped below, so neither family needs its own projection.
+            title = SafeStr(req, "title");
+            description = SafeStr(req, "description");
+            kind = SafeStr(req, "kind");
         }
 
         // Derive a chat-provider phase. "requested" stays as-is. For the
@@ -3412,7 +3445,7 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
         // through to the catch-all ``resolved`` with a warning, rather
         // than silently mis-classifying.
         string phase;
-        if (topLevelEventType == "exec.approval.requested")
+        if (topLevelEventType.EndsWith(".requested", StringComparison.Ordinal))
         {
             phase = "requested";
         }
@@ -3443,6 +3476,15 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
         };
         if (!string.IsNullOrEmpty(decision))
             flat["decision"] = decision;
+        // Only set when the wire carried them, so an exec approval's
+        // envelope is byte-for-byte what it was before plugin approvals
+        // shared this path.
+        if (!string.IsNullOrEmpty(title))
+            flat["title"] = title;
+        if (!string.IsNullOrEmpty(description))
+            flat["message"] = description;
+        if (!string.IsNullOrEmpty(kind))
+            flat["kind"] = kind;
 
         // Clone into a JsonElement that owns its backing memory.
         JsonElement data;
