@@ -3432,8 +3432,21 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
         string title = "";
         string description = "";
         string kind = "";
+        // Which answers the request accepts. A plugin approval says so --
+        // "allow-always" is there only when the plugin offers it -- and a
+        // client that shows a button the gateway will refuse has shown a
+        // button that does nothing.
+        JsonArray? allowedDecisions = null;
         if (payload.TryGetProperty("request", out var req) && req.ValueKind == JsonValueKind.Object)
         {
+            if (req.TryGetProperty("allowedDecisions", out var allowed) && allowed.ValueKind == JsonValueKind.Array)
+            {
+                allowedDecisions = new JsonArray();
+                foreach (var item in allowed.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String) allowedDecisions.Add(item.GetString());
+                }
+            }
             command = SafeStr(req, "command");
             host = SafeStr(req, "host");
             sessionKey = SafeStr(req, "sessionKey");
@@ -3499,6 +3512,8 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
             flat["message"] = description;
         if (!string.IsNullOrEmpty(kind))
             flat["kind"] = kind;
+        if (allowedDecisions is { Count: > 0 })
+            flat["allowedDecisions"] = allowedDecisions;
 
         // Clone into a JsonElement that owns its backing memory.
         JsonElement data;
